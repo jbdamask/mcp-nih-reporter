@@ -31,12 +31,6 @@ load_dotenv()
 # Configuration
 API_NAME = "NIH RePORTER"
 API_BASE = "https://api.reporter.nih.gov/v2"
-API_KEY_NAME = "DATA_GOV_API_KEY"
-
-# Get API_KEY from environment variables
-API_KEY = os.getenv(API_KEY_NAME)
-if not API_KEY:
-    raise ValueError(f"{API_KEY_NAME} environment variable is required")
 
 # Initialize FastMCP server
 mcp = FastMCP(API_NAME)
@@ -44,8 +38,7 @@ mcp = FastMCP(API_NAME)
 class NIHReporterClient:
     """Client for interacting with the NIH RePORTER API"""
     
-    def __init__(self, api_key: str):
-        self.api_key = api_key
+    def __init__(self):
         self.headers = {
             "Content-Type": "application/json",
         }
@@ -338,7 +331,7 @@ class NIHReporterClient:
             raise
 
 # Initialize API client
-api_client = NIHReporterClient(API_KEY)
+api_client = NIHReporterClient()
 
 @mcp.tool()
 async def search_projects(

@@ -24,7 +24,6 @@ Honestly, it ain't great. This was a PoC for building MCPs more than a must-have
 ## Prerequisites
 
 - Python 3.12 or higher
-- A Data.gov API key for NIH RePORTER
 - UV package manager (recommended for faster dependency installation)
 
 ## Installation
@@ -46,10 +45,6 @@ source .venv/bin/activate  # On Windows, use `.venv\Scripts\activate`
 uv pip install -e .
 ```
 
-4. Create a `.env` file in the project root and add your Data.gov API key:
-```
-DATA_GOV_API_KEY=your_api_key_here
-```
 
 ## Usage
 
@@ -64,6 +59,25 @@ You can use this MCP with any MCP-compatible client, such as:
 - Claude Desktop
 - Cursor
 - Other MCP-enabled tools
+
+### Example claude_desktop_config.json
+```
+{
+  "mcpServers": {
+	 "nih-reporter": {
+	      "command": "<fully qualified path to>/uv",
+	      "args": [
+	        "run",
+	        "--with",
+	        "mcp[cli]",
+	        "mcp",
+	        "run",
+	        "<fully qualified path to>/mcp-nih-reporter/mcp-nih-reporter.py"
+	      ]
+	    }
+  }
+}
+```
 
 The search results will be returned in a structured format containing project details including:
 - Project title and abstract
