@@ -1,8 +1,9 @@
 # NIH RePORTER MCP
 
-A Mission Control Protocol (MCP) server that provides access to the NIH RePORTER API, allowing you to search and retrieve information about NIH-funded research projects and publications.
+A Model Context Protocol [(MCP)](https://modelcontextprotocol.io/introduction) server for chatting with [NIH RePORTER](https://reporter.nih.gov/). Search for NIH-funded research projects and publications in a conversational manner.
 
-Honestly, it ain't great. This was a PoC for building MCPs more than a must-have tool. For the contributing section of the read me, 
+![img](/img/mcp-nih-reporter-claude.png)
+
 
 ## Features
 
