@@ -44,8 +44,6 @@ source .venv/bin/activate  # On Windows, use `.venv\Scripts\activate`
 ```bash
 uv pip install -e .
 ```
-
-
 ## Usage
 
 This MCP server provides access to the NIH RePORTER API through several tools:
@@ -85,6 +83,10 @@ The search results will be returned in a structured format containing project de
 - Organization details
 - Funding information
 - Project dates and status
+
+## Debugging
+
+A log file will be created in the root folder when the MCP attempts to run in a client (e.g. Claude Desktop). Check there if you're having trouble.
 
 ## Development
 

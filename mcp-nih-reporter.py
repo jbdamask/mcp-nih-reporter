@@ -218,11 +218,11 @@ class NIHReporterClient:
         async with httpx.AsyncClient() as client:
             # Construct the payload according to API specification
             payload = {
-                "criteria": {
-                    "core_project_nums": criteria.get("criteria", {}).get("core_project_nums", [])
-                },
+                "criteria": criteria.get("criteria", {}),
                 "limit": criteria.get("limit", 50),
-                "offset": criteria.get("offset", 0)
+                "offset": criteria.get("offset", 0),
+                "sort_field": criteria.get("sort_field", "core_project_nums"),
+                "sort_order": criteria.get("sort_order", "desc")
             }
             
             # Add publication years if specified
@@ -526,7 +526,12 @@ async def search_publications(
         
         # Handle core project numbers
         if core_project_nums:
-            proj_list = [num.strip() for num in core_project_nums.split(",")]
+            logger.info(f"Processing core_project_nums input: {core_project_nums}")
+            # Clean the input string of any quotes
+            clean_input = core_project_nums.strip().strip('"').strip("'")
+            logger.info(f"Cleaned input: {clean_input}")
+            proj_list = [num.strip() for num in clean_input.split(",")]
+            logger.info(f"Created project list: {proj_list}")
             criteria["core_project_nums"] = proj_list
         
         # Ensure limit is within bounds
@@ -534,7 +539,7 @@ async def search_publications(
         
         logger.info(f"Constructed publication search criteria: {json.dumps(criteria, indent=2)}")
         
-        results = await api_client.get_publications(criteria)
+        results = await api_client.get_publications({"criteria": criteria})
         return api_client.format_publication_results(results)
         
     except Exception as e:
@@ -642,22 +647,12 @@ async def search_combined(
                     project_nums.append(project["project_num"])
             
             if project_nums:
+                logger.info(f"Found project numbers for publication search: {project_nums}")
                 pub_criteria = {
                     "criteria": {
                         "core_project_nums": project_nums
                     },
-                    "limit": 100,  # Get more publications since they're related
-                    "include_fields": [
-                        "title",
-                        "authors",
-                        "journal_title",
-                        "journal_issue",
-                        "journal_volume",
-                        "publication_year",
-                        "pmid",
-                        "doi",
-                        "core_project_num"
-                    ]
+                    "limit": 100  # Get more publications since they're related
                 }
                 
                 # Only add publication years if explicitly specified by the user
@@ -670,8 +665,6 @@ async def search_combined(
                     except ValueError as e:
                         logger.error(f"Invalid publication years format: {publication_years}")
                         return f"Error: Invalid publication years format. Please provide comma-separated years without quotes (e.g., 2020,2021)"
-                else:
-                    logger.info("No publication years specified - will return all related publications regardless of year")
                 
                 logger.info(f"Searching for publications with criteria: {json.dumps(pub_criteria, indent=2)}")
                 pub_results = await api_client.get_publications(pub_criteria)
