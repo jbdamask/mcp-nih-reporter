@@ -173,14 +173,40 @@ class NIHReporterClient:
                         phr
                     ])
                 
-                # Add publications section if requested and available
-                if include_publications and project.get('project_num'):
-                    pub_info = [
+                # Add publications section if available
+                if include_publications and project.get('related_publications'):
+                    project_info.extend([
                         "",
-                        "#### Related Publications",
-                        "_Fetching related publications..._"
-                    ]
-                    project_info.extend(pub_info)
+                        "#### Related Publications"
+                    ])
+                    
+                    for pub in project.get('related_publications', []):
+                        pmid = pub.get('pmid')
+                        title = pub.get('title', 'Untitled Publication')
+                        
+                        pub_info = [""]
+                        
+                        # Always show the PMID if we have it
+                        if pmid:
+                            pub_info.append(f"##### {title} (PMID: [{pmid}](https://pubmed.ncbi.nlm.nih.gov/{pmid}/))")
+                        else:
+                            pub_info.append(f"##### {title}")
+                        
+                        # Add other details if we have them
+                        if pub.get('authors'):
+                            author_str = ", ".join(pub['authors'])
+                            pub_info.append(f"**Authors:** {author_str}")
+                        
+                        if pub.get('journal_title'):
+                            pub_info.append(f"**Journal:** {pub['journal_title']}")
+                            
+                        if pub.get('publication_year'):
+                            pub_info.append(f"**Year:** {pub['publication_year']}")
+                            
+                        if pub.get('doi'):
+                            pub_info.append(f"**DOI:** [{pub['doi']}](https://doi.org/{pub['doi']})")
+                        
+                        project_info.extend(pub_info)
                 
                 project_info.extend(["", "---", ""])
                 formatted_results.append("\n".join(filter(None, project_info)))
@@ -197,11 +223,19 @@ class NIHReporterClient:
         """Get publications from NIH RePORTER API"""
         logger.info(f"Fetching publications from NIH RePORTER with criteria: {criteria}")
         async with httpx.AsyncClient() as client:
+            # Construct the payload according to API specification
             payload = {
-                "criteria": criteria or {},
+                "criteria": {
+                    "core_project_nums": criteria.get("criteria", {}).get("core_project_nums", [])
+                },
                 "limit": criteria.get("limit", 50),
                 "offset": criteria.get("offset", 0)
             }
+            
+            # Add publication years if specified
+            if "publication_years" in criteria.get("criteria", {}):
+                payload["criteria"]["publication_years"] = criteria["criteria"]["publication_years"]
+            
             logger.debug(f"Sending payload to NIH Publications API: {json.dumps(payload, indent=2)}")
             
             try:
@@ -212,6 +246,30 @@ class NIHReporterClient:
                 )
                 response.raise_for_status()
                 response_data = response.json()
+                
+                # If we got PMIDs, fetch the full publication details from PubMed
+                if response_data.get("results"):
+                    pmids = [str(result.get("pmid")) for result in response_data["results"] if result.get("pmid")]
+                    if pmids:
+                        async with httpx.AsyncClient() as pubmed_client:
+                            # Use E-utilities to get full publication details
+                            pubmed_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={','.join(pmids)}&retmode=json"
+                            pubmed_response = await pubmed_client.get(pubmed_url)
+                            pubmed_data = pubmed_response.json()
+                            
+                            # Update our results with PubMed data
+                            for result in response_data["results"]:
+                                if result.get("pmid"):
+                                    pmid = str(result["pmid"])
+                                    if pmid in pubmed_data.get("result", {}):
+                                        pub_details = pubmed_data["result"][pmid]
+                                        result.update({
+                                            "title": pub_details.get("title", ""),
+                                            "authors": [author.get("name", "") for author in pub_details.get("authors", [])],
+                                            "journal_title": pub_details.get("fulljournalname", ""),
+                                            "publication_year": pub_details.get("pubdate", "").split()[0] if pub_details.get("pubdate") else None
+                                        })
+                
                 logger.debug(f"Received response: {json.dumps(response_data, indent=2)}")
                 return response_data
             except httpx.HTTPStatusError as e:
@@ -333,26 +391,42 @@ async def search_projects(
         
         # Basic criteria
         if fiscal_years:
-            years = [int(year.strip()) for year in fiscal_years.split(",")]
-            criteria["fiscal_years"] = years
+            try:
+                # Handle escaped quotes and clean the input string
+                years_str = fiscal_years.replace('\\"', '').replace('"', '').strip()
+                years = [int(year.strip()) for year in years_str.split(",") if year.strip()]
+                if not years:
+                    raise ValueError("No valid years found after parsing")
+                criteria["fiscal_years"] = years
+            except ValueError as e:
+                logger.error(f"Invalid fiscal years format: {fiscal_years}, error: {str(e)}")
+                return f"Error: Invalid fiscal years format. Please provide comma-separated years (e.g., 2020,2021)"
         
         # Handle multiple PI names
         if pi_names:
-            names = [name.strip() for name in pi_names.split(",")]
-            criteria["pi_names"] = [{"any_name": name} for name in names]
+            try:
+                # Handle escaped quotes and clean the input string
+                names_str = pi_names.replace('\\"', '').replace('"', '').strip()
+                names = [name.strip() for name in names_str.split(",") if name.strip()]
+                if not names:
+                    raise ValueError("No valid names found after parsing")
+                criteria["pi_names"] = [{"any_name": name} for name in names]
+            except Exception as e:
+                logger.error(f"Invalid PI names format: {pi_names}, error: {str(e)}")
+                return f"Error: Invalid PI names format. Please provide comma-separated names"
         
         # Organization criteria
         org_criteria = {}
         if organization:
-            org_criteria["org_names"] = [organization]
+            org_criteria["org_names"] = [organization.strip().strip('"').strip("'")]
         if org_state:
-            org_criteria["org_states"] = [org_state.upper()]
+            org_criteria["org_states"] = [org_state.strip().strip('"').strip("'").upper()]
         if org_city:
-            org_criteria["org_cities"] = [org_city]
+            org_criteria["org_cities"] = [org_city.strip().strip('"').strip("'")]
         if org_type:
-            org_criteria["org_types"] = [org_type]
+            org_criteria["org_types"] = [org_type.strip().strip('"').strip("'")]
         if org_department:
-            org_criteria["org_depts"] = [org_department]
+            org_criteria["org_depts"] = [org_department.strip().strip('"').strip("'")]
         if org_criteria:
             criteria.update(org_criteria)
         
@@ -369,22 +443,27 @@ async def search_projects(
         
         # Funding mechanism
         if funding_mechanism:
-            criteria["funding_mechanism"] = funding_mechanism
+            criteria["funding_mechanism"] = funding_mechanism.strip().strip('"').strip("'")
             
         # Institute/Center code
         if ic_code:
-            criteria["agency_ic_admin"] = ic_code.upper()
+            criteria["agency_ic_admin"] = ic_code.strip().strip('"').strip("'").upper()
             
         # RCDC terms
         if rcdc_terms:
-            terms = [term.strip() for term in rcdc_terms.split(",")]
-            criteria["rcdc_terms"] = terms
+            try:
+                terms_str = rcdc_terms.strip().strip('"').strip("'")
+                terms = [term.strip() for term in terms_str.split(",")]
+                criteria["rcdc_terms"] = terms
+            except Exception as e:
+                logger.error(f"Invalid RCDC terms format: {rcdc_terms}")
+                return f"Error: Invalid RCDC terms format. Please provide comma-separated terms without quotes"
         
         # Date criteria
         if start_date or end_date:
             criteria["date_range"] = {
-                "start_date": start_date,
-                "end_date": end_date
+                "start_date": start_date.strip().strip('"').strip("'") if start_date else None,
+                "end_date": end_date.strip().strip('"').strip("'") if end_date else None
             }
         
         # Other filters
@@ -402,7 +481,11 @@ async def search_projects(
             include_fields.extend(["abstract_text", "phr_text"])
         
         # Ensure limit is within bounds
-        criteria["limit"] = min(max(1, limit), 50)
+        try:
+            criteria["limit"] = min(max(1, int(limit)), 50)
+        except (ValueError, TypeError):
+            logger.error(f"Invalid limit value: {limit}")
+            return f"Error: Invalid limit value. Please provide a number between 1 and 50"
         
         logger.info(f"Constructed search criteria: {json.dumps(criteria, indent=2)}")
         
@@ -509,12 +592,28 @@ async def search_combined(
         project_criteria = {}
         
         if fiscal_years:
-            years = [int(year.strip()) for year in fiscal_years.split(",")]
-            project_criteria["fiscal_years"] = years
+            try:
+                # Handle escaped quotes and clean the input string
+                years_str = fiscal_years.replace('\\"', '').replace('"', '').strip()
+                years = [int(year.strip()) for year in years_str.split(",") if year.strip()]
+                if not years:
+                    raise ValueError("No valid years found after parsing")
+                project_criteria["fiscal_years"] = years
+            except ValueError as e:
+                logger.error(f"Invalid fiscal years format: {fiscal_years}, error: {str(e)}")
+                return f"Error: Invalid fiscal years format. Please provide comma-separated years (e.g., 2020,2021)"
         
         if pi_names:
-            names = [name.strip() for name in pi_names.split(",")]
-            project_criteria["pi_names"] = [{"any_name": name} for name in names]
+            try:
+                # Handle escaped quotes and clean the input string
+                names_str = pi_names.replace('\\"', '').replace('"', '').strip()
+                names = [name.strip() for name in names_str.split(",") if name.strip()]
+                if not names:
+                    raise ValueError("No valid names found after parsing")
+                project_criteria["pi_names"] = [{"any_name": name} for name in names]
+            except Exception as e:
+                logger.error(f"Invalid PI names format: {pi_names}, error: {str(e)}")
+                return f"Error: Invalid PI names format. Please provide comma-separated names"
         
         if organization:
             project_criteria["org_names"] = [organization]
@@ -523,10 +622,10 @@ async def search_combined(
             project_criteria["org_states"] = [org_state.upper()]
             
         if funding_mechanism:
-            project_criteria["funding_mechanism"] = funding_mechanism
+            project_criteria["funding_mechanism"] = funding_mechanism.strip().strip('"').strip("'")
             
         if ic_code:
-            project_criteria["agency_ic_admin"] = ic_code.upper()
+            project_criteria["agency_ic_admin"] = ic_code.strip().strip('"').strip("'").upper()
             
         if min_amount is not None or max_amount is not None:
             project_criteria["award_amount_range"] = {
@@ -551,33 +650,53 @@ async def search_combined(
             
             if project_nums:
                 pub_criteria = {
-                    "core_project_nums": project_nums,
-                    "limit": 100  # Get more publications since they're related
+                    "criteria": {
+                        "core_project_nums": project_nums
+                    },
+                    "limit": 100,  # Get more publications since they're related
+                    "include_fields": [
+                        "title",
+                        "authors",
+                        "journal_title",
+                        "journal_issue",
+                        "journal_volume",
+                        "publication_year",
+                        "pmid",
+                        "doi",
+                        "core_project_num"
+                    ]
                 }
                 
+                # Only add publication years if explicitly specified by the user
                 if publication_years:
-                    years = [int(year.strip()) for year in publication_years.split(",")]
-                    pub_criteria["publication_years"] = years
+                    try:
+                        years_str = publication_years.strip().strip('"').strip("'")
+                        years = [int(year.strip()) for year in years_str.split(",")]
+                        pub_criteria["criteria"]["publication_years"] = years
+                        logger.info(f"Filtering publications by years: {years}")
+                    except ValueError as e:
+                        logger.error(f"Invalid publication years format: {publication_years}")
+                        return f"Error: Invalid publication years format. Please provide comma-separated years without quotes (e.g., 2020,2021)"
+                else:
+                    logger.info("No publication years specified - will return all related publications regardless of year")
                 
-                logger.info(f"Searching for related publications with criteria: {json.dumps(pub_criteria, indent=2)}")
+                logger.info(f"Searching for publications with criteria: {json.dumps(pub_criteria, indent=2)}")
                 pub_results = await api_client.get_publications(pub_criteria)
                 
-                # Create a mapping of project numbers to their publications
-                project_pubs = {}
+                # Add publications to each project
+                pub_by_project = {}
                 for pub in pub_results.get("results", []):
                     proj_num = pub.get("core_project_num")
                     if proj_num:
-                        if proj_num not in project_pubs:
-                            project_pubs[proj_num] = []
-                        project_pubs[proj_num].append(pub)
+                        if proj_num not in pub_by_project:
+                            pub_by_project[proj_num] = []
+                        pub_by_project[proj_num].append(pub)
                 
-                # Add publication information to each project
                 for project in project_results.get("results", []):
                     proj_num = project.get("project_num")
-                    if proj_num and proj_num in project_pubs:
-                        project["related_publications"] = project_pubs[proj_num]
+                    if proj_num in pub_by_project:
+                        project["related_publications"] = pub_by_project[proj_num]
         
-        # Format results with publications included
         return api_client.format_project_results(project_results, include_publications=include_publications)
         
     except Exception as e:
