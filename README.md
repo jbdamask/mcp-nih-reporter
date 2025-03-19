@@ -1,6 +1,7 @@
 # NIH RePORTER MCP
 
 A Model Context Protocol [(MCP)](https://modelcontextprotocol.io/introduction) server for chatting with [NIH RePORTER](https://reporter.nih.gov/). Search for NIH-funded research projects and publications in a conversational manner.
+Accompanying blog post [here](https://open.substack.com/pub/johndamask/p/building-an-mcp-server-over-nihs?r=2ee1b&utm_campaign=post&utm_medium=web&showWelcomeOnShare=true).
 
 ![img](/img/mcp-nih-reporter-claude.png)
 
